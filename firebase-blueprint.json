@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and state",
+      "type": "object",
+      "properties": {
+        "onboardingComplete": { "type": "boolean" },
+        "assessment": { "$ref": "#/entities/UserAssessment" },
+        "weeklyPlan": { "$ref": "#/entities/WeeklyPlan" },
+        "estimatedIELTSBand": { "type": "number" },
+        "streak": {
+          "type": "object",
+          "properties": {
+            "count": { "type": "number" },
+            "lastLoginDate": { "type": "string" },
+            "best": { "type": "number" }
+          }
+        },
+        "achievements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "icon": { "type": "string" },
+              "dateEarned": { "type": "string" },
+              "isUnlocked": { "type": "boolean" }
+            }
+          }
+        },
+        "masteryScores": {
+          "type": "object",
+          "properties": {
+            "speaking": { "type": "number" },
+            "writing": { "type": "number" },
+            "listening": { "type": "number" },
+            "reading": { "type": "number" },
+            "grammar": { "type": "number" },
+            "vocabulary": { "type": "number" }
+          }
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["onboardingComplete", "estimatedIELTSBand", "masteryScores"]
+    },
+    "UserAssessment": {
+      "title": "UserAssessment",
+      "type": "object",
+      "properties": {
+        "goals": { "type": "array", "items": { "type": "string" } },
+        "interests": { "type": "array", "items": { "type": "string" } },
+        "currentLevel": { "type": "string" },
+        "targetIELTSScore": { "type": "number" },
+        "weaknesses": { "type": "array", "items": { "type": "string" } },
+        "strengths": { "type": "array", "items": { "type": "string" } },
+        "preferredTopics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "WeeklyPlan": {
+      "title": "WeeklyPlan",
+      "type": "object",
+      "properties": {
+        "monthTitle": { "type": "string" },
+        "focus": { "type": "string" },
+        "tasks": { "type": "array", "items": { "$ref": "#/entities/LearningTask" } },
+        "aiAdvice": { "type": "string" },
+        "lastGenerated": { "type": "string" }
+      }
+    },
+    "LearningTask": {
+      "title": "LearningTask",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "topic": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "estimatedTime": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "isTest": { "type": "boolean" }
+      }
+    },
+    "HistoryItem": {
+      "title": "HistoryItem",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "score": { "type": "number" },
+        "feedback": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "taskType": { "type": "string" }
+      },
+      "required": ["taskId", "score", "feedback", "date", "taskType"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and plan"
+    },
+    "/users/{userId}/history/{historyId}": {
+      "schema": "HistoryItem",
+      "description": "User exercise history"
+    }
+  }
+}

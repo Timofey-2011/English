@@ -1,0 +1,13 @@
+{
+  "name": "Cognito AI: English Mastery System",
+  "description": "Professional-grade AI English mastering platform focusing on IELTS, relocation, and career-defining fluency with neural synchronization.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI-driven personalization",
+    "Speech recognition & practice",
+    "IELTS preparation",
+    "Writing feedback"
+  ]
+}
