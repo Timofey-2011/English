@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   // Базовый путь: название твоего репозитория на GitHub
-  base: '/English/', 
+  base: './', 
   build: {
     // Эта настройка поможет правильно связать скрипты
     assetsDir: 'assets',
