@@ -30,7 +30,7 @@ jobs:
         # Здесь мы прокидываем твой ключ из настроек GitHub в само приложение
         run: npm run build
         env:
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+          Gemini_API_Key: ${{ secrets.VITE_GEMINI_API_KEY }}
 
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v3
