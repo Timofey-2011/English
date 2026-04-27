@@ -1,10 +1,19 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: './', // Точка и слэш заставляют пути быть относительными
+  // Базовый путь: название твоего репозитория на GitHub
+  base: '/English/', 
   build: {
-    outDir: 'dist',
+    // Эта настройка поможет правильно связать скрипты
+    assetsDir: 'assets',
+  },
+  server: {
+    // Чтобы на компьютере тоже всё работало
+    fs: {
+      strict: false
+    }
   }
 })
