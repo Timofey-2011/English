@@ -12,6 +12,7 @@ export const db = initializeFirestore(app, {
 }, firebaseConfig.firestoreDatabaseId);
 
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
@@ -69,10 +70,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     if (!quotaExceededGlobal) {
       quotaExceededGlobal = true;
       localStorage.setItem(QUOTA_KEY, Date.now().toString());
-      console.warn("CRITICAL: Firestore Quota Exceeded. Suspending network activity.");
+      console.warn("CRITICAL: Firestore Quota Exceeded. Suspending network activity for this session.");
       disableNetwork(db).catch(() => {});
     }
-    // Return instead of throw to prevent crashing/looping components that don't catch correctly
+    // Return early to avoid logging the same quota error repeatedly and throwing to crash UI
     return;
   }
   
@@ -92,8 +93,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   }
-  console.error('Firestore Error Detail: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  
+  const errorJson = JSON.stringify(errInfo);
+  console.error('Firestore Error Detailed JSON: ', errorJson);
+  throw new Error(errorJson);
 }
 
 let isSigningIn = false;
