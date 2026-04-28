@@ -932,21 +932,27 @@ function AuthStatus({ user, loading, lastSyncedAt, onSync, quotaExceeded }: { us
     return (
       <button 
         onClick={async () => {
-          if (isQuotaExceeded()) {
-            alert("Neural Link Offline: Daily synchronization quota exceeded. Identity link will resume tomorrow.");
-            return;
-          }
           try {
+            if (isQuotaExceeded()) {
+              console.warn("Attempting login while quota is suspended. Cloud sync will be unavailable.");
+            }
             await signInWithGoogle();
-          } catch (e) {
-            console.log("Nav sync auth suppressed.");
+          } catch (e: any) {
+            console.error("Neural Link Authentication Error:", e);
+            if (e.code === 'auth/popup-blocked') {
+              alert("Всплывающее окно заблокировано. Пожалуйста, разрешите всплывающие окна для работы авторизации.");
+            } else if (e.code === 'auth/cancelled-popup-request') {
+               // Normal user cancel
+            } else {
+              alert("Ошибка подключения: " + e.message);
+            }
           }
         }}
-        className={`flex items-center gap-3 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest group ${isQuotaExceeded() ? 'border-red-500/30 opacity-50 cursor-not-allowed' : 'border-white/5'}`}
+        className={`flex items-center gap-3 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest group ${isQuotaExceeded() ? 'border-red-500/30' : 'border-white/5'}`}
       >
         <div className={`w-4 h-4 flex items-center justify-center rounded-full font-serif font-black text-[10px] text-white ${isQuotaExceeded() ? 'bg-red-500/20' : 'bg-white/10'}`}>G</div>
-        <span className={`hidden sm:block font-black uppercase tracking-widest ml-1 ${isQuotaExceeded() ? 'text-red-400' : 'text-accent-blue'}`}>
-          {isQuotaExceeded() ? 'Sync Offline' : 'Connect ID'}
+        <span className={`hidden sm:block font-black uppercase tracking-widest ml-1 ${isQuotaExceeded() ? 'text-red-400 opacity-70' : 'text-accent-blue'}`}>
+          {isQuotaExceeded() ? 'Connect (No Sync)' : 'Connect ID'}
         </span>
         <div className="sm:hidden flex items-center gap-2">
            <Smartphone className={`w-3 h-3 ${isQuotaExceeded() ? 'text-red-400' : 'text-accent-blue'}`} />
@@ -961,7 +967,7 @@ function AuthStatus({ user, loading, lastSyncedAt, onSync, quotaExceeded }: { us
         <div className="text-right hidden sm:block">
           <p className="text-[10px] font-black uppercase tracking-tighter text-white/40">Neural Link</p>
           <p className={`text-[9px] italic font-bold ${quotaExceeded ? 'text-red-400' : 'text-accent-blue'}`}>
-            {quotaExceeded ? 'Link Suspended' : (lastSyncedAt ? `Synced ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Sync Pending')}
+            {quotaExceeded ? 'Лимит превышен' : (lastSyncedAt ? `Синхр: ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Ожидание синхр.')}
           </p>
         </div>
         <div className="relative group">
