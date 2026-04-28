@@ -11,7 +11,8 @@ interface FirebaseContextType {
   saveHistoryItem: (item: any) => Promise<void>;
   remoteState: Partial<AppState> | null;
   quotaExceeded: boolean;
-  lastSyncedAt: Date | null;import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+  lastSyncedAt: Date | null;}
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp, disableNetwork } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType, isQuotaExceeded } from '../lib/firebase';
