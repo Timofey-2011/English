@@ -50,7 +50,7 @@ import { signInWithGoogle, logout, isQuotaExceeded } from './lib/firebase';
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 export default function App() {
-  const { user, loading: firebaseLoading, syncState, saveHistoryItem, remoteState, quotaExceeded } = useFirebase();
+  const { user, loading: firebaseLoading, syncState, saveHistoryItem, remoteState, quotaExceeded, lastSyncedAt } = useFirebase();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [state, setState] = useState<AppState>(() => {
@@ -256,13 +256,13 @@ export default function App() {
     localStorage.setItem('linguist_ai_state', JSON.stringify(state));
     
     // Fail fast if quota is exceeded or storage marks it as such
-    if (user && state.onboardingComplete && !quotaExceeded && sessionStorage.getItem('firestore_quota_exceeded') !== 'true') {
+    if (user && state.onboardingComplete && !quotaExceeded && !isQuotaExceeded()) {
       const handler = setTimeout(() => {
         // Double check right before calling
-        if (sessionStorage.getItem('firestore_quota_exceeded') !== 'true' && !isQuotaExceeded()) {
+        if (!isQuotaExceeded()) {
           syncState(state);
         }
-      }, 60000); 
+      }, 300000); // 5 minutes sync interval - heavily throttled for quota preservation
 
       return () => clearTimeout(handler);
     }
@@ -529,7 +529,7 @@ export default function App() {
               <h1 className="text-sm font-black tracking-tighter italic">COGNITO <span className="text-accent-blue font-black">AI</span></h1>
            </div>
            <div className="flex items-center gap-4">
-              <AuthStatus user={user} loading={firebaseLoading} />
+              <AuthStatus user={user} loading={firebaseLoading} lastSyncedAt={lastSyncedAt} onSync={() => syncState(state)} quotaExceeded={quotaExceeded} />
               <button 
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                 className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white"
@@ -674,7 +674,7 @@ export default function App() {
               </div>
 
               <div className="mb-10 px-3">
-                 <AuthStatus user={user} loading={firebaseLoading} />
+                 <AuthStatus user={user} loading={firebaseLoading} lastSyncedAt={lastSyncedAt} onSync={() => syncState(state)} quotaExceeded={quotaExceeded} />
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto custom-scrollbar pr-2">
@@ -857,6 +857,26 @@ export default function App() {
                 )}
               </AnimatePresence>
             </main>
+            
+            {/* Quota Exhausted Warning */}
+            <AnimatePresence>
+              {quotaExceeded && (
+                <motion.div 
+                  initial={{ y: 50, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 50, opacity: 0 }}
+                  className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-6"
+                >
+                  <div className="bg-red-500/10 backdrop-blur-3xl border border-red-500/20 p-4 rounded-2xl flex items-start gap-4 shadow-2xl">
+                    <Shield className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-red-400 mb-1">Local Storage Mode Active</h4>
+                      <p className="text-[10px] text-red-400/80 leading-relaxed font-bold italic"> Daily cloud sync quota reached. Progress is being saved locally and will synchronize once bandwidth resets.</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Bottom Navigation Matrix */}
             {!activeTask && !activeScenario && state.onboardingComplete && (
@@ -905,54 +925,73 @@ export default function App() {
   );
 }
 
-function AuthStatus({ user, loading }: { user: any, loading: boolean }) {
+function AuthStatus({ user, loading, lastSyncedAt, onSync, quotaExceeded }: { user: any, loading: boolean, lastSyncedAt: Date | null, onSync: () => void, quotaExceeded: boolean }) {
   if (loading) return <div className="animate-pulse w-8 h-8 rounded-full bg-white/10" />;
 
   if (!user) {
     return (
       <button 
         onClick={async () => {
+          if (isQuotaExceeded()) {
+            alert("Neural Link Offline: Daily synchronization quota exceeded. Identity link will resume tomorrow.");
+            return;
+          }
           try {
             await signInWithGoogle();
           } catch (e) {
             console.log("Nav sync auth suppressed.");
           }
         }}
-        className="flex items-center gap-3 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all text-sm font-bold group"
+        className={`flex items-center gap-3 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest group ${isQuotaExceeded() ? 'border-red-500/30 opacity-50 cursor-not-allowed' : 'border-white/5'}`}
       >
-        <LogIn className="w-4 h-4 text-accent-blue group-hover:scale-110 transition-transform" />
-        <span className="hidden sm:block">Sync Cloud</span>
+        <div className={`w-4 h-4 flex items-center justify-center rounded-full font-serif font-black text-[10px] text-white ${isQuotaExceeded() ? 'bg-red-500/20' : 'bg-white/10'}`}>G</div>
+        <span className={`hidden sm:block font-black uppercase tracking-widest ml-1 ${isQuotaExceeded() ? 'text-red-400' : 'text-accent-blue'}`}>
+          {isQuotaExceeded() ? 'Sync Offline' : 'Connect ID'}
+        </span>
         <div className="sm:hidden flex items-center gap-2">
-           <Smartphone className="w-3 h-3 text-accent-blue" />
+           <Smartphone className={`w-3 h-3 ${isQuotaExceeded() ? 'text-red-400' : 'text-accent-blue'}`} />
         </div>
       </button>
     );
   }
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="relative group">
-        <img 
-          src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}`} 
-          alt={user.displayName || 'User'} 
-          className="w-9 h-9 rounded-full border border-accent-blue shadow-lg shadow-accent-blue/10"
-          referrerPolicy="no-referrer"
-        />
-        <div className="absolute top-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-bg-base rounded-full" />
+    <div className="flex items-center gap-3 sm:gap-6">
+      <div className="flex items-center gap-3 sm:pr-4 sm:border-r border-white/10">
+        <div className="text-right hidden sm:block">
+          <p className="text-[10px] font-black uppercase tracking-tighter text-white/40">Neural Link</p>
+          <p className={`text-[9px] italic font-bold ${quotaExceeded ? 'text-red-400' : 'text-accent-blue'}`}>
+            {quotaExceeded ? 'Link Suspended' : (lastSyncedAt ? `Synced ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Sync Pending')}
+          </p>
+        </div>
+        <div className="relative group">
+          <img 
+            src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}`} 
+            alt={user.displayName || 'User'} 
+            className={`w-10 h-10 rounded-xl border shadow-lg ${quotaExceeded ? 'border-red-500/30 shadow-red-500/5' : 'border-accent-blue/30 shadow-accent-blue/5'}`}
+            referrerPolicy="no-referrer"
+          />
+          <div className={`absolute top-0 right-0 w-3 h-3 border-2 border-bg-base rounded-full ${quotaExceeded ? 'bg-red-500 animate-pulse' : 'bg-emerald-400'}`} />
+        </div>
       </div>
-      <div className="hidden sm:flex flex-col">
-          <span className="text-[10px] font-black uppercase tracking-widest text-white/40 leading-none mb-1">Authenticated</span>
-          <button 
-            onClick={logout}
-            className="text-[10px] font-bold text-red-400/60 hover:text-red-400 transition-colors uppercase tracking-widest text-left flex items-center gap-1 group"
-          >
-            <LogOut className="w-2.5 h-2.5 group-hover:-translate-x-1 transition-transform" />
-            Sign Out
-          </button>
+
+      <div className="flex items-center gap-2">
+        <button 
+          onClick={quotaExceeded ? () => {} : onSync}
+          disabled={quotaExceeded}
+          className={`w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center transition-all group ${quotaExceeded ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white/10'}`}
+          title={quotaExceeded ? "Quota Exceeded" : "Manual Neural Sync"}
+        >
+          <RefreshCw className={`w-4 h-4 ${quotaExceeded ? 'text-red-400' : 'text-accent-blue group-hover:rotate-180 transition-transform duration-700'}`} />
+        </button>
+        <button 
+          onClick={() => logout()}
+          className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/10 flex items-center justify-center hover:bg-red-500/20 transition-all group"
+          title="Terminate Link"
+        >
+          <LogOut className="w-4 h-4 text-red-400 group-hover:scale-110 transition-transform" />
+        </button>
       </div>
-      <button onClick={logout} className="sm:hidden w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-red-400">
-          <LogOut className="w-4 h-4" />
-      </button>
     </div>
   );
 }
