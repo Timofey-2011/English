@@ -39,17 +39,41 @@ interface FirestoreErrorInfo {
   }
 }
 
-let quotaExceededGlobal = sessionStorage.getItem('firestore_quota_exceeded') === 'true';
+const QUOTA_KEY = 'firestore_quota_exceeded_timestamp';
+
+const checkQuotaExpiry = () => {
+  const saved = localStorage.getItem(QUOTA_KEY);
+  if (!saved) return false;
+  const timestamp = parseInt(saved, 10);
+  const now = Date.now();
+  // Quota usually resets at midnight Pacific Time, but a 24-hour block is a safe assumption for client-side stabilization
+  if (now - timestamp > 24 * 60 * 60 * 1000) {
+    localStorage.removeItem(QUOTA_KEY);
+    return false;
+  }
+  return true;
+};
+
+let quotaExceededGlobal = checkQuotaExpiry();
+
+if (quotaExceededGlobal) {
+  console.warn("[Firebase] Initializing in offline-only mode due to active quota suspension.");
+  disableNetwork(db).catch(() => {});
+}
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes('resource-exhausted') || message.includes('Quota exceeded')) {
+  const isQuotaError = message.includes('resource-exhausted') || message.includes('Quota exceeded');
+  
+  if (isQuotaError) {
     if (!quotaExceededGlobal) {
       quotaExceededGlobal = true;
-      sessionStorage.setItem('firestore_quota_exceeded', 'true');
-      console.warn("CRITICAL: Firestore Quota Exceeded. Disconnecting network to prevent retry loops.");
-      disableNetwork(db).catch(e => console.error("Failed to disable network:", e));
+      localStorage.setItem(QUOTA_KEY, Date.now().toString());
+      console.warn("CRITICAL: Firestore Quota Exceeded. Suspending network activity.");
+      disableNetwork(db).catch(() => {});
     }
+    // Return instead of throw to prevent crashing/looping components that don't catch correctly
+    return;
   }
   
   const errInfo: FirestoreErrorInfo = {
@@ -71,20 +95,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error Detail: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-// Validation test per instructions
-async function testConnection() {
-  if (quotaExceededGlobal || sessionStorage.getItem('firestore_quota_exceeded') === 'true') {
-    return;
-  }
-  try {
-    const docRef = doc(db, 'test', 'connection');
-    await getDocFromServer(docRef);
-  } catch (error: any) {
-    // Ignore early errors to prevent noise if we're hitting quota right away
-  }
-}
-testConnection();
 
 let isSigningIn = false;
 
@@ -109,8 +119,10 @@ export const signInWithGoogle = async () => {
     isSigningIn = false;
   }
 };
+
 export const logout = () => signOut(auth);
+
 // Logic check: if quota exceeded, we should fail fast to avoid SDK retries
 export const isQuotaExceeded = () => {
-    return quotaExceededGlobal || sessionStorage.getItem('firestore_quota_exceeded') === 'true';
+    return quotaExceededGlobal || checkQuotaExpiry();
 };
