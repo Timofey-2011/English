@@ -10,6 +10,7 @@ import {
   Mic, 
   Headphones, 
   PenTool, 
+  Trash2,
   Settings, 
   ChevronRight, 
   CheckCircle2, 
@@ -41,7 +42,7 @@ import {
   User as UserIcon,
   Smartphone
 } from 'lucide-react';
-import { generateLearningPlan, getExerciseFeedback, getTutorResponse, getTaskAudio, getWordTranslation, generateScenarios, generateReplacementTask } from './lib/gemini';
+import { generateLearningPlan, getExerciseFeedback, getTutorResponse, getTaskAudio, getWordTranslation, generateScenarios, generateReplacementTask, getScenarioTutorResponse } from './lib/gemini';
 import { AppState, UserAssessment, LearningTask, WeeklyPlan, AIChatMessage, ProficiencyLevel, AppMode, CommunicationScenario } from './types';
 import { useFirebase } from './components/FirebaseProvider';
 import { signInWithGoogle, logout, isQuotaExceeded } from './lib/firebase';
@@ -210,6 +211,8 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [isAddingScenario, setIsAddingScenario] = useState(false);
+  const [newScenarioData, setNewScenarioData] = useState({ situation: '', description: '', goal: '' });
   const [activeTask, setActiveTask] = useState<LearningTask | null>(null);
   const [activeScenario, setActiveScenario] = useState<CommunicationScenario | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
@@ -251,7 +254,7 @@ export default function App() {
     }
   }, [user, remoteState?.streak?.lastLoginDate]);
 
-  // Debounced Sync Effect to stay within free tier limits
+  // Throttled Sync Effect to stay within free tier limits
   useEffect(() => {
     localStorage.setItem('linguist_ai_state', JSON.stringify(state));
     
@@ -259,10 +262,10 @@ export default function App() {
     if (user && state.onboardingComplete && !quotaExceeded && !isQuotaExceeded()) {
       const handler = setTimeout(() => {
         // Double check right before calling
-        if (!isQuotaExceeded()) {
+        if (!isQuotaExceeded() && !quotaExceeded) {
           syncState(state);
         }
-      }, 300000); // 5 minutes sync interval - heavily throttled for quota preservation
+      }, 600000); // 10 minutes sync interval - heavily throttled for quota preservation
 
       return () => clearTimeout(handler);
     }
@@ -513,8 +516,183 @@ export default function App() {
             className="fixed top-0 inset-x-0 z-[200] bg-orange-500/90 backdrop-blur-md text-white py-3 px-6 text-center text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-2xl"
           >
             <Shield className="w-4 h-4" />
-            <span>Neural Link Limited: Daily Synchronization Quota Exceeded. Progress will be saved locally.</span>
+            <span>Лимит исчерпан: Нейронная связь ограничена. Прогресс сохраняется локально. Продлите подписку или дождитесь сброса квот.</span>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isAddingScenario && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 sm:p-10">
+             <motion.div 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }} 
+               className="absolute inset-0 bg-bg-base/80 backdrop-blur-2xl" 
+               onClick={() => setIsAddingScenario(false)}
+             />
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.9, y: 30 }}
+               animate={{ opacity: 1, scale: 1, y: 0 }}
+               exit={{ opacity: 0, scale: 0.9, y: 30 }}
+               className="glass-morphism p-10 sm:p-16 rounded-[4rem] border-accent-gold/20 w-full max-w-3xl relative z-10 space-y-10"
+             >
+                <div className="space-y-4 text-left">
+                   <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter">Новый Сценарий</h3>
+                   <p className="text-text-dim italic font-light">Добавьте собственную ситуацию для отработки коммуникации.</p>
+                </div>
+                
+                <div className="space-y-8 text-left">
+                   <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-accent-gold">Название (Ситуация)</div>
+                      <input 
+                        value={newScenarioData.situation}
+                        onChange={(e) => setNewScenarioData(prev => ({ ...prev, situation: e.target.value }))}
+                        placeholder="Например: Переговоры о зарплате"
+                        className="w-full bg-white/5 border border-white/10 rounded-3xl px-8 py-5 text-white outline-none focus:border-accent-gold transition-all"
+                      />
+                   </div>
+                   <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-accent-gold">Описание (Контекст)</div>
+                      <textarea 
+                        value={newScenarioData.description}
+                        onChange={(e) => setNewScenarioData(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Опишите ситуацию подробнее..."
+                        className="w-full h-32 bg-white/5 border border-white/10 rounded-3xl px-8 py-5 text-white outline-none focus:border-accent-gold transition-all custom-scrollbar"
+                      />
+                   </div>
+                   <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-accent-gold">Ваша цель</div>
+                      <input 
+                        value={newScenarioData.goal}
+                        onChange={(e) => setNewScenarioData(prev => ({ ...prev, goal: e.target.value }))}
+                        placeholder="Чего вы хотите добиться в диалоге?"
+                        className="w-full bg-white/5 border border-white/10 rounded-3xl px-8 py-5 text-white outline-none focus:border-accent-gold transition-all"
+                      />
+                   </div>
+                </div>
+
+                <div className="flex gap-4 pt-6">
+                   <button 
+                     onClick={() => setIsAddingScenario(false)}
+                     className="flex-1 py-5 rounded-3xl border border-white/10 text-white font-bold uppercase tracking-widest hover:bg-white/5 transition-all"
+                   >
+                     Отмена
+                   </button>
+                   <button 
+                     disabled={!newScenarioData.situation || !newScenarioData.description || !newScenarioData.goal}
+                     onClick={() => {
+                        const newScenario: CommunicationScenario = {
+                          id: `custom-${Date.now()}`,
+                          type: 'voice',
+                          situation: newScenarioData.situation,
+                          description: newScenarioData.description,
+                          goal: newScenarioData.goal,
+                          roleAI: 'Counterpart',
+                          roleUser: 'Speaker',
+                          difficulty: state.assessment?.currentLevel || 'Intermediate'
+                        };
+                        setState(prev => ({
+                          ...prev,
+                          communicationScenarios: [newScenario, ...prev.communicationScenarios]
+                        }));
+                        setIsAddingScenario(false);
+                        setNewScenarioData({ situation: '', description: '', goal: '' });
+                     }}
+                     className="flex-[2] py-5 rounded-3xl bg-accent-gold text-bg-base font-black italic uppercase tracking-widest hover:scale-105 transition-all disabled:opacity-30 disabled:scale-100"
+                   >
+                     Создать Фазу
+                   </button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {isAddingScenario && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 sm:p-10">
+             <motion.div 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }} 
+               className="absolute inset-0 bg-bg-base/80 backdrop-blur-2xl" 
+               onClick={() => setIsAddingScenario(false)}
+             />
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.9, y: 30 }}
+               animate={{ opacity: 1, scale: 1, y: 0 }}
+               exit={{ opacity: 0, scale: 0.9, y: 30 }}
+               className="glass-morphism p-10 sm:p-16 rounded-[4rem] border-accent-gold/20 w-full max-w-3xl relative z-10 space-y-10"
+             >
+                <div className="space-y-4 text-left">
+                   <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter">Новый Сценарий</h3>
+                   <p className="text-text-dim italic font-light">Добавьте собственную ситуацию для отработки коммуникации.</p>
+                </div>
+                
+                <div className="space-y-8 text-left">
+                   <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-accent-gold">Название (Ситуация)</div>
+                      <input 
+                        value={newScenarioData.situation}
+                        onChange={(e) => setNewScenarioData(prev => ({ ...prev, situation: e.target.value }))}
+                        placeholder="Например: Переговоры о зарплате"
+                        className="w-full bg-white/5 border border-white/10 rounded-3xl px-8 py-5 text-white outline-none focus:border-accent-gold transition-all"
+                      />
+                   </div>
+                   <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-accent-gold">Описание (Контекст)</div>
+                      <textarea 
+                        value={newScenarioData.description}
+                        onChange={(e) => setNewScenarioData(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Опишите ситуацию подробнее..."
+                        className="w-full h-32 bg-white/5 border border-white/10 rounded-3xl px-8 py-5 text-white outline-none focus:border-accent-gold transition-all custom-scrollbar"
+                      />
+                   </div>
+                   <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-accent-gold">Ваша цель</div>
+                      <input 
+                        value={newScenarioData.goal}
+                        onChange={(e) => setNewScenarioData(prev => ({ ...prev, goal: e.target.value }))}
+                        placeholder="Чего вы хотите добиться в диалоге?"
+                        className="w-full bg-white/5 border border-white/10 rounded-3xl px-8 py-5 text-white outline-none focus:border-accent-gold transition-all"
+                      />
+                   </div>
+                </div>
+
+                <div className="flex gap-4 pt-6">
+                   <button 
+                     onClick={() => setIsAddingScenario(false)}
+                     className="flex-1 py-5 rounded-3xl border border-white/10 text-white font-bold uppercase tracking-widest hover:bg-white/5 transition-all"
+                   >
+                     Отмена
+                   </button>
+                   <button 
+                     disabled={!newScenarioData.situation || !newScenarioData.description || !newScenarioData.goal}
+                     onClick={() => {
+                        const newScenario: CommunicationScenario = {
+                          id: `custom-${Date.now()}`,
+                          type: 'voice',
+                          situation: newScenarioData.situation,
+                          description: newScenarioData.description,
+                          goal: newScenarioData.goal,
+                          roleAI: 'Counterpart',
+                          roleUser: 'Speaker',
+                          difficulty: state.assessment?.currentLevel || 'Intermediate'
+                        };
+                        setState(prev => ({
+                          ...prev,
+                          communicationScenarios: [newScenario, ...prev.communicationScenarios]
+                        }));
+                        setIsAddingScenario(false);
+                        setNewScenarioData({ situation: '', description: '', goal: '' });
+                     }}
+                     className="flex-[2] py-5 rounded-3xl bg-accent-gold text-bg-base font-black italic uppercase tracking-widest hover:scale-105 transition-all disabled:opacity-30 disabled:scale-100"
+                   >
+                     Создать Фазу
+                   </button>
+                </div>
+             </motion.div>
+          </div>
         )}
       </AnimatePresence>
       <div className="neural-background" />
@@ -794,6 +972,13 @@ export default function App() {
                             setIsLoading(false);
                           });
                         }}
+                        onDelete={(id) => {
+                          setState(prev => ({
+                            ...prev,
+                            communicationScenarios: prev.communicationScenarios.filter(s => s.id !== id)
+                          }));
+                        }}
+                        onAdd={() => setIsAddingScenario(true)}
                      />
                    </motion.div>
                 ) : settingsOpen ? (
@@ -940,11 +1125,14 @@ function AuthStatus({ user, loading, lastSyncedAt, onSync, quotaExceeded }: { us
           } catch (e: any) {
             console.error("Neural Link Authentication Error:", e);
             if (e.code === 'auth/popup-blocked') {
-              alert("Всплывающее окно заблокировано. Пожалуйста, разрешите всплывающие окна для работы авторизации.");
-            } else if (e.code === 'auth/cancelled-popup-request') {
-               // Normal user cancel
+              alert("Всплывающее окно заблокировано. Пожалуйста, разрешите всплывающие окна в настройках браузера и попробуйте снова.");
+            } else if (e.code === 'auth/cancelled-popup-request' || e.code === 'auth/popup-closed-by-user') {
+               // Normal user cancel - keep silent but log
+               console.log("User closed sign-in popup.");
+            } else if (e.code === 'auth/network-request-failed') {
+              alert("Ошибка сети при авторизации. Проверьте соединение.");
             } else {
-              alert("Ошибка подключения: " + e.message);
+              alert("Ошибка подключения (Neural Link Error): " + (e.message || "Unknown error"));
             }
           }
         }}
@@ -962,7 +1150,7 @@ function AuthStatus({ user, loading, lastSyncedAt, onSync, quotaExceeded }: { us
   }
 
   return (
-    <div className="flex items-center gap-3 sm:gap-6">
+      <div className="flex items-center gap-3 sm:gap-6">
       <div className="flex items-center gap-3 sm:pr-4 sm:border-r border-white/10">
         <div className="text-right hidden sm:block">
           <p className="text-[10px] font-black uppercase tracking-tighter text-white/40">Neural Link</p>
@@ -2075,23 +2263,31 @@ function ExerciseView({
       recognition.onresult = (event: any) => {
         let transcript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            transcript += event.results[i][0].transcript;
+          }
         }
-        setUserInput(transcript);
+        if (transcript) {
+          setUserInput(userInput + (userInput ? ' ' : '') + transcript);
+        }
       };
 
-      recognition.onend = () => setRecording(false);
+      recognition.onend = () => {
+        if (recording) {
+          try { recognition.start(); } catch (e) {}
+        }
+      };
       recognitionRef.current = recognition;
     }
-  }, []);
+  }, [recording]);
 
   const toggleRecording = () => {
     if (recording) {
+      setRecording(false);
       recognitionRef.current?.stop();
     } else {
-      setUserInput('');
-      recognitionRef.current?.start();
       setRecording(true);
+      recognitionRef.current?.start();
     }
   };
 
@@ -2143,7 +2339,7 @@ function ExerciseView({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-20 gap-8">
         <button onClick={onClose} className="p-4 sm:p-5 bg-white/5 border border-white/10 rounded-2xl text-text-dim hover:text-white hover:border-white/20 transition-all flex items-center gap-4 font-black uppercase tracking-widest text-[9px] group backdrop-blur-3xl shadow-2xl">
           <ArrowRight className="w-5 h-5 rotate-180 group-hover:-translate-x-2 transition-transform" />
-          Abort Mission
+          Назад в Хаб
         </button>
         <div className="flex items-center gap-8 w-full sm:w-auto justify-between">
            <div className="text-right">
@@ -2350,10 +2546,19 @@ function ExerciseView({
                            <textarea
                              value={userInput}
                              onChange={(e) => setUserInput(e.target.value)}
-                             placeholder={task.type === 'reading' ? "Begin neural data interpretation..." : "Drafting mission response schema..."}
+                             placeholder={task.type === 'reading' ? "Интерпретация данных..." : "Подготовка ответа..."}
                              className="w-full min-h-[550px] bg-bg-base/50 p-16 lg:p-24 rounded-[4.5rem] border border-white/5 focus:border-accent-blue/30 focus:bg-bg-base/70 outline-none transition-all text-2xl lg:text-3xl font-light leading-relaxed text-white placeholder:text-white/10 italic custom-scrollbar shadow-inner"
                            />
-                           <div className="absolute bottom-12 right-12 text-[10px] font-mono font-bold text-white/10 uppercase tracking-[0.3em] pointer-events-none group-hover:text-white/30 transition-all italic">Linguist.COGNITO_v3.Alpha</div>
+                           <div className="absolute bottom-12 right-12 flex items-center gap-6">
+                              <button 
+                                onClick={toggleRecording}
+                                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${recording ? 'bg-red-500 shadow-lg shadow-red-500/20' : 'bg-white/5 text-white/40 hover:text-white hover:bg-white/10'}`}
+                                title={recording ? "Остановить запись" : "Начать запись голосом"}
+                              >
+                                 <Mic className={`w-6 h-6 ${recording ? 'animate-pulse text-white' : ''}`} />
+                              </button>
+                              <div className="text-[10px] font-mono font-bold text-white/10 uppercase tracking-[0.3em] pointer-events-none group-hover:text-white/30 transition-all italic">Linguist.COGNITO_v3.Alpha</div>
+                           </div>
                         </div>
                       )}
                     </div>
@@ -2545,7 +2750,7 @@ function ExerciseView({
   );
 }
 
-function CommunicationView({ scenarios, onSelect, onRegenerate }: { scenarios: CommunicationScenario[], onSelect: (s: CommunicationScenario) => void, onRegenerate: () => void }) {
+function CommunicationView({ scenarios, onSelect, onRegenerate, onDelete, onAdd }: { scenarios: CommunicationScenario[], onSelect: (s: CommunicationScenario) => void, onRegenerate: () => void, onDelete: (id: string) => void, onAdd: () => void }) {
   return (
     <div className="max-w-6xl mx-auto space-y-12 py-10">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 px-4 sm:px-0">
@@ -2556,25 +2761,45 @@ function CommunicationView({ scenarios, onSelect, onRegenerate }: { scenarios: C
            </h2>
            <p className="mt-4 text-text-dim text-base lg:text-lg font-light italic opacity-60">High-stakes situational immersion. Master the art of conflict, negotiation, and social dynamics.</p>
         </div>
-        <button 
-          onClick={onRegenerate}
-          className="flex items-center gap-3 px-8 py-4 rounded-full border border-white/10 text-white hover:bg-white/5 transition-all group"
-        >
-          <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-700" />
-          <span className="font-black italic uppercase tracking-tighter text-sm">Regenerate Matrix</span>
-        </button>
+        <div className="flex gap-4">
+          <button 
+            onClick={onAdd}
+            className="flex items-center gap-3 px-8 py-4 rounded-full border border-accent-gold/30 text-accent-gold hover:bg-accent-gold/10 transition-all font-black italic uppercase tracking-tighter text-sm"
+          >
+            <Plus className="w-5 h-5" />
+            Add Custom Phase
+          </button>
+          <button 
+            onClick={onRegenerate}
+            className="flex items-center gap-3 px-8 py-4 rounded-full border border-white/10 text-white hover:bg-white/5 transition-all group"
+          >
+            <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-700" />
+            <span className="font-black italic uppercase tracking-tighter text-sm">Regenerate Matrix</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {(scenarios || []).map((s) => (
-          <motion.button
+          <motion.div
             key={s.id}
-            whileHover={{ y: -10, scale: 1.02 }}
+            whileHover={{ y: -10 }}
+            className="glass-morphism p-10 rounded-[3.5rem] border-white/5 hover:border-accent-gold/30 transition-all text-left flex flex-col group relative overflow-hidden cursor-pointer"
             onClick={() => onSelect(s)}
-            className="glass-morphism p-10 rounded-[3.5rem] border-white/5 hover:border-accent-gold/30 transition-all text-left flex flex-col group relative overflow-hidden"
           >
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-8 ${s.type === 'voice' ? 'bg-accent-gold/20 text-accent-gold' : 'bg-accent-blue/20 text-accent-blue'}`}>
-               {s.type === 'voice' ? <Mic className="w-7 h-7" /> : <MessageSquare className="w-7 h-7" />}
+            <div className="flex justify-between items-start mb-8">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${s.type === 'voice' ? 'bg-accent-gold/20 text-accent-gold' : 'bg-accent-blue/20 text-accent-blue'}`}>
+                 {s.type === 'voice' ? <Mic className="w-7 h-7" /> : <MessageSquare className="w-7 h-7" />}
+              </div>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(s.id);
+                }}
+                className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-text-dim hover:text-red-400 hover:bg-red-400/10 transition-all z-10"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
             </div>
             
             <div className="text-[10px] font-black uppercase tracking-widest text-text-dim opacity-40 mb-2">Scenario Alpha</div>
@@ -2592,10 +2817,10 @@ function CommunicationView({ scenarios, onSelect, onRegenerate }: { scenarios: C
                </div>
             </div>
             
-            <div className="absolute top-0 right-0 p-8 opacity-[0.02] group-hover:opacity-[0.05] transition-opacity">
+            <div className="absolute top-0 right-0 p-8 opacity-[0.02] group-hover:opacity-[0.05] transition-opacity pointer-events-none">
                {s.type === 'voice' ? <Volume2 className="w-32 h-32" /> : <Send className="w-32 h-32" />}
             </div>
-          </motion.button>
+          </motion.div>
         ))}
       </div>
 
@@ -2618,21 +2843,51 @@ function ScenarioSession({ scenario, onClose, state, setState, setLoadingStatus 
   const [messages, setMessages] = useState<AIChatMessage[]>([{ role: 'assistant', content: `[${scenario.roleAI}]: Hello. Let's begin the scenario. ${scenario.description} Your goal: ${scenario.goal}` }]);
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [interactionMode, setInteractionMode] = useState<'assistant' | 'live' | null>(null);
   const [feedback, setFeedback] = useState<{ score: number, feedback: string } | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState<string | null>(null);
   const recognition = useRef<any>(null);
+
+  const speakText = (text: string, id: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const strippedText = text.replace(/\[.*?\]/g, ''); // Don't read hints
+      const utterance = new SpeechSynthesisUtterance(strippedText);
+      utterance.lang = 'en-US';
+      utterance.onstart = () => setIsSpeaking(id);
+      utterance.onend = () => setIsSpeaking(null);
+      window.speechSynthesis.speak(utterance);
+    }
+  };
 
   useEffect(() => {
     if (SpeechRecognition) {
       recognition.current = new SpeechRecognition();
-      recognition.current.continuous = false;
+      recognition.current.continuous = true;
+      recognition.current.interimResults = true;
       recognition.current.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setInput(transcript);
-        setIsListening(false);
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          setInput(prev => prev ? `${prev} ${finalTranscript}` : finalTranscript);
+        }
+      };
+      recognition.current.onend = () => {
+        if (isListening) {
+          try { recognition.current?.start(); } catch (e) {}
+        }
       };
       recognition.current.onerror = () => setIsListening(false);
     }
-  }, []);
+    return () => {
+      window.speechSynthesis.cancel();
+      recognition.current?.stop();
+    };
+  }, [isListening]);
 
   const toggleListening = () => {
     if (isListening) {
@@ -2649,11 +2904,16 @@ function ScenarioSession({ scenario, onClose, state, setState, setLoadingStatus 
     const userMsg = { role: 'user' as const, content: input };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setIsListening(false);
+    recognition.current?.stop();
 
     try {
-      // Use the tutor service or a specialized scenario service (simulated here with tutor for speed)
-      const aiResponse = await getTutorResponse([...messages, userMsg]);
-      setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
+      const response = await getScenarioTutorResponse(scenario, [...messages, userMsg], interactionMode || 'assistant');
+      const aiMsg = { role: 'assistant' as const, content: response };
+      setMessages(prev => [...prev, aiMsg]);
+      if (interactionMode === 'live') {
+        speakText(response, `ai-${messages.length + 1}`);
+      }
     } catch (e) {
       setMessages(prev => [...prev, { role: 'assistant', content: "SYSTEM_ERROR: Neural relay lost." }]);
     }
@@ -2686,118 +2946,195 @@ function ScenarioSession({ scenario, onClose, state, setState, setLoadingStatus 
 
   return (
     <div className="max-w-5xl mx-auto py-10 space-y-10">
-      <div className="flex flex-col lg:flex-row items-center lg:items-start justify-between gap-4 px-4 sm:px-0">
-        <button onClick={onClose} className="flex items-center gap-3 text-text-dim hover:text-white transition-colors group">
-           <ChevronRight className="w-6 h-6 rotate-180" />
-           <span className="font-black italic uppercase tracking-widest text-[10px]">Exit Layer</span>
-        </button>
-        <div className="text-center lg:text-right">
-           <div className="text-[10px] font-black uppercase tracking-[0.4em] text-accent-gold mb-1">Active Scenario</div>
-           <div className="text-lg lg:text-xl font-bold text-white italic">{scenario.situation}</div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-        <div className="lg:col-span-2 space-y-8">
-           <div className="glass-morphism h-[600px] rounded-[3.5rem] flex flex-col overflow-hidden relative">
-              <div className="p-8 border-b border-white/5 bg-white/2 flex items-center justify-between">
-                 <div className="flex items-center gap-4">
-                    <div className="w-3 h-3 rounded-full bg-accent-gold animate-pulse" />
-                    <div>
-                       <div className="text-[8px] font-black uppercase text-accent-gold tracking-widest">Neural Uplink Status</div>
-                       <div className="text-xs font-bold text-white italic">Live Transmission...</div>
-                    </div>
-                 </div>
-                 <div className="text-[10px] font-black uppercase tracking-widest text-text-dim opacity-30">Goal: {scenario.goal}</div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-10 space-y-8 custom-scrollbar">
-                {messages.map((m, i) => (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    key={i} 
-                    className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`max-w-[85%] p-8 rounded-[2.5rem] ${m.role === 'user' ? 'bg-accent-blue/10 border border-accent-blue/20 text-white rounded-br-none' : 'bg-white/5 border border-white/5 text-white/90 rounded-bl-none'}`}>
-                       <div className="text-[8px] font-black uppercase tracking-widest opacity-40 mb-3">{m.role === 'assistant' ? scenario.roleAI : scenario.roleUser}</div>
-                       <p className="text-lg font-light leading-relaxed italic">{m.content}</p>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-
-              <div className="p-8 border-t border-white/5 bg-white/2">
-                 <div className="flex gap-4">
-                    {scenario.type === 'voice' && (
-                      <button 
-                        onClick={toggleListening}
-                        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-accent-gold/20 text-accent-gold hover:bg-accent-gold/30'}`}
-                      >
-                        <Mic className="w-8 h-8" />
-                      </button>
-                    )}
-                    <div className="flex-1 relative">
-                       <input 
-                         value={input}
-                         onChange={(e) => setInput(e.target.value)}
-                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                         placeholder={isListening ? "Listening..." : "Formulate your tactical response..."}
-                         className="w-full h-16 bg-white/5 border border-white/10 rounded-full px-8 text-white focus:outline-none focus:border-accent-blue transition-all"
-                       />
-                       <button onClick={handleSend} className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-accent-blue text-white rounded-full flex items-center justify-center hover:scale-105 transition-all">
-                          <Send className="w-5 h-5" />
-                       </button>
-                    </div>
-                 </div>
-              </div>
-           </div>
-
-           <div className="flex gap-4">
-              <button onClick={handleEvaluate} className="flex-1 h-20 glass-morphism rounded-[2rem] border-accent-gold/20 flex items-center justify-center gap-4 text-white hover:bg-accent-gold/5 transition-all">
-                 <Target className="w-6 h-6 text-accent-gold" />
-                 <span className="font-black italic uppercase tracking-widest text-sm">Seal & Analyze Session</span>
+      <AnimatePresence mode="wait">
+        {!interactionMode ? (
+          <motion.div 
+            key="mode-selector"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="glass-morphism p-16 rounded-[4rem] text-center border-accent-gold/20 space-y-10"
+          >
+            <div className="w-24 h-24 rounded-full bg-accent-gold/20 flex items-center justify-center mx-auto mb-4">
+              <Zap className="w-12 h-12 text-accent-gold" />
+            </div>
+            <div>
+              <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter mb-4">Select Uplink Protocol</h3>
+              <p className="text-text-dim text-lg italic opacity-60">How would you like to engage with this linguistic phase?</p>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6">
+              <button 
+                onClick={() => setInteractionMode('assistant')}
+                className="p-10 rounded-[3rem] bg-white/5 border border-white/10 hover:border-accent-blue/50 transition-all group text-left"
+              >
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-accent-blue/20 flex items-center justify-center">
+                    <MessageSquare className="w-6 h-6 text-accent-blue" />
+                  </div>
+                  <h4 className="text-xl font-black text-white italic">Assistant Mode</h4>
+                </div>
+                <p className="text-sm text-text-dim italic leading-relaxed">AI Persona with embedded tutoring. Receive hints [in brackets] and tactical linguistic advice as the dialogue unfolds.</p>
               </button>
-           </div>
-        </div>
 
-        <div className="space-y-8">
-           <div className="glass-morphism p-10 rounded-[3rem] border-accent-gold/10">
-              <h4 className="text-xl font-black italic text-white uppercase tracking-tighter mb-6">Mission Briefing</h4>
-              <div className="space-y-6">
-                 <div>
-                    <div className="text-[10px] font-black uppercase text-accent-gold tracking-widest mb-1">Perspective</div>
-                    <div className="text-sm text-white font-bold">{scenario.roleUser}</div>
+              <button 
+                onClick={() => setInteractionMode('live')}
+                className="p-10 rounded-[3rem] bg-white/5 border border-white/10 hover:border-accent-gold/50 transition-all group text-left"
+              >
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-accent-gold/20 flex items-center justify-center">
+                    <Zap className="w-6 h-6 text-accent-gold" />
+                  </div>
+                  <h4 className="text-xl font-black text-white italic">Live Roleplay (Exam)</h4>
+                </div>
+                <p className="text-sm text-text-dim italic leading-relaxed">Pure immersion. AI remains strictly in character. Zero assistance, zero translations. Survive the conflict on your own terms.</p>
+              </button>
+            </div>
+
+            <div className="pt-6">
+              <button onClick={onClose} className="text-text-dim hover:text-white uppercase font-black text-[10px] tracking-[0.3em] transition-colors">Abort Mission</button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="active-session"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-10"
+          >
+            <div className="flex flex-col lg:flex-row items-center lg:items-start justify-between gap-4 px-4 sm:px-0">
+              <button onClick={onClose} className="flex items-center gap-3 text-text-dim hover:text-white transition-colors group">
+                 <ChevronRight className="w-6 h-6 rotate-180" />
+                 <span className="font-black italic uppercase tracking-widest text-[10px]">Выход</span>
+              </button>
+              <div className="flex items-center gap-6">
+                 <div className="text-center lg:text-right">
+                    <div className="text-[10px] font-black uppercase tracking-[0.4em] text-accent-gold mb-1">Активный Сценарий</div>
+                    <div className="text-lg lg:text-xl font-bold text-white italic">{scenario.situation}</div>
                  </div>
-                 <div>
-                    <div className="text-[10px] font-black uppercase text-accent-gold tracking-widest mb-1">Objective</div>
-                    <div className="text-sm text-white/80 font-light italic">{scenario.goal}</div>
-                 </div>
-                 <div className="pt-6 border-t border-white/5">
-                    <p className="text-xs text-text-dim italic leading-relaxed">
-                       PRO-TIP: Use idioms and varied sentence structures to boost your activation score.
-                    </p>
+                 <div className={`px-4 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${interactionMode === 'live' ? 'border-accent-gold/30 text-accent-gold' : 'border-accent-blue/30 text-accent-blue'}`}>
+                    {interactionMode === 'live' ? 'ЖИВОЙ ЭКЗАМЕН' : 'РЕЖИМ АССИСТЕНТА'}
                  </div>
               </div>
-           </div>
+            </div>
 
-           {feedback && (
-             <motion.div 
-               initial={{ opacity: 0, scale: 0.9 }}
-               animate={{ opacity: 1, scale: 1 }}
-               className="glass-morphism p-10 rounded-[3rem] border-accent-blue bg-accent-blue/5"
-             >
-                <div className="flex items-center justify-between mb-8">
-                   <h4 className="text-xl font-black italic text-white uppercase tracking-tighter">Debriefing</h4>
-                   <div className="text-3xl font-black italic text-accent-blue">{feedback.score}<span className="text-xs opacity-50">/100</span></div>
-                </div>
-                <div className="text-sm text-text-dim leading-relaxed italic font-light whitespace-pre-wrap">
-                   {feedback.feedback}
-                </div>
-             </motion.div>
-           )}
-        </div>
-      </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+              <div className="lg:col-span-2 space-y-8">
+                 <div className="glass-morphism h-[600px] rounded-[3.5rem] flex flex-col overflow-hidden relative">
+                    <div className="p-8 border-b border-white/5 bg-white/2 flex items-center justify-between">
+                       <div className="flex items-center gap-4">
+                          <div className={`w-3 h-3 rounded-full animate-pulse ${interactionMode === 'live' ? 'bg-red-500' : 'bg-accent-gold'}`} />
+                          <div>
+                             <div className="text-[8px] font-black uppercase tracking-widest opacity-60">Статус Канала</div>
+                             <div className="text-xs font-bold text-white italic">{interactionMode === 'live' ? 'ПРЯМАЯ ТРАНСЛЯЦИЯ' : 'СТАБИЛЬНЫЙ КАНАЛ'}</div>
+                          </div>
+                       </div>
+                       {interactionMode === 'assistant' && (
+                         <div className="text-[10px] font-black uppercase tracking-widest text-text-dim opacity-30">Цель: {scenario.goal}</div>
+                       )}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-10 space-y-8 custom-scrollbar">
+                      {messages.map((m, i) => (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          key={i} 
+                          className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div className={`max-w-[85%] p-8 rounded-[2.5rem] relative group/msg ${m.role === 'user' ? 'bg-accent-blue/10 border border-accent-blue/20 text-white rounded-br-none' : 'bg-white/5 border border-white/5 text-white/90 rounded-bl-none'}`}>
+                             <div className="flex justify-between items-start mb-3">
+                               <div className="text-[8px] font-black uppercase tracking-widest opacity-40">{m.role === 'assistant' ? scenario.roleAI : scenario.roleUser}</div>
+                               {m.role === 'assistant' && (
+                                 <button 
+                                   onClick={() => speakText(m.content, `msg-${i}`)}
+                                   className={`transition-colors ${isSpeaking === `msg-${i}` ? 'text-accent-gold' : 'text-white/20 hover:text-accent-gold'}`}
+                                 >
+                                   <Volume2 className={`w-3 h-3 ${isSpeaking === `msg-${i}` ? 'animate-pulse' : ''}`} />
+                                 </button>
+                               )}
+                             </div>
+                             <p className="text-lg font-light leading-relaxed italic">{m.content}</p>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    <div className="p-8 border-t border-white/5 bg-white/2">
+                       <div className="flex gap-4">
+                          <button 
+                            onClick={toggleListening}
+                            className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${isListening ? 'bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]' : 'bg-accent-gold/20 text-accent-gold hover:bg-accent-gold/30'}`}
+                            title={isListening ? "Остановить запись" : "Начать запись"}
+                          >
+                            <Mic className={`w-8 h-8 ${isListening ? 'animate-pulse' : ''}`} />
+                          </button>
+                          <div className="flex-1 relative">
+                             <input 
+                               value={input}
+                               onChange={(e) => setInput(e.target.value)}
+                               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                               placeholder={isListening ? "Слушаю... (Нажмите на микрофон, чтобы остановить)" : "Ваш тактический ответ..."}
+                               className="w-full h-16 bg-white/5 border border-white/10 rounded-full px-8 text-white focus:outline-none focus:border-accent-blue transition-all placeholder:italic"
+                             />
+                             <button onClick={handleSend} className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-accent-blue text-white rounded-full flex items-center justify-center hover:scale-105 transition-all">
+                                <Send className="w-5 h-5" />
+                             </button>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="flex gap-4">
+                    <button onClick={handleEvaluate} className="flex-1 h-20 glass-morphism rounded-[2rem] border-accent-gold/20 flex items-center justify-center gap-4 text-white hover:bg-accent-gold/5 transition-all">
+                       <Target className="w-6 h-6 text-accent-gold" />
+                       <span className="font-black italic uppercase tracking-widest text-sm">Seal & Analyze Session</span>
+                    </button>
+                 </div>
+              </div>
+
+              <div className="space-y-8">
+                 {interactionMode === 'assistant' && (
+                   <div className="glass-morphism p-10 rounded-[3rem] border-accent-gold/10">
+                      <h4 className="text-xl font-black italic text-white uppercase tracking-tighter mb-6">Mission Briefing</h4>
+                      <div className="space-y-6">
+                         <div>
+                            <div className="text-[10px] font-black uppercase text-accent-gold tracking-widest mb-1">Perspective</div>
+                            <div className="text-sm text-white font-bold">{scenario.roleUser}</div>
+                         </div>
+                         <div>
+                            <div className="text-[10px] font-black uppercase text-accent-gold tracking-widest mb-1">Objective</div>
+                            <div className="text-sm text-white/80 font-light italic">{scenario.goal}</div>
+                         </div>
+                         <div className="pt-6 border-t border-white/5">
+                            <p className="text-xs text-text-dim italic leading-relaxed">
+                               PRO-TIP: Use idioms and varied sentence structures to boost your activation score.
+                            </p>
+                         </div>
+                      </div>
+                   </div>
+                 )}
+
+                 {feedback && (
+                   <motion.div 
+                     initial={{ opacity: 0, scale: 0.9 }}
+                     animate={{ opacity: 1, scale: 1 }}
+                     className="glass-morphism p-10 rounded-[3rem] border-accent-blue bg-accent-blue/5"
+                   >
+                      <div className="flex items-center justify-between mb-8">
+                         <h4 className="text-xl font-black italic text-white uppercase tracking-tighter">Debriefing</h4>
+                         <div className="text-3xl font-black italic text-accent-blue">{feedback.score}<span className="text-xs opacity-50">/100</span></div>
+                      </div>
+                      <div className="text-sm text-text-dim leading-relaxed italic font-light whitespace-pre-wrap">
+                         {feedback.feedback}
+                      </div>
+                   </motion.div>
+                 )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
