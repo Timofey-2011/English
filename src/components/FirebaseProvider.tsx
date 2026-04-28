@@ -11,6 +11,7 @@ interface FirebaseContextType {
   saveHistoryItem: (item: any) => Promise<void>;
   remoteState: Partial<AppState> | null;
   quotaExceeded: boolean;
+  lastSyncedAt: Date | null;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -19,21 +20,33 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [remoteState, setRemoteState] = useState<Partial<AppState> | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const isWritingRef = useRef(false);
-  const [quotaExceeded, setQuotaExceeded] = useState(() => {
-    return sessionStorage.getItem('firestore_quota_exceeded') === 'true';
-  });
+  const lastSyncRef = useRef<string | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(() => isQuotaExceeded());
 
   const handleQuotaExceeded = useCallback(() => {
     if (!quotaExceeded) {
       setQuotaExceeded(true);
-      sessionStorage.setItem('firestore_quota_exceeded', 'true');
       console.error("SYSTEM CRITICAL: Firestore Write Quota Exceeded. All cloud sync suspended.");
-      disableNetwork(db).catch(() => {}); // Kill all background tasks
+      disableNetwork(db).catch(() => {});
     }
   }, [quotaExceeded]);
 
   useEffect(() => {
+    // Aggressive network cutoff if quota is detected during usage
+    if (quotaExceeded) {
+      console.warn("[FirebaseProvider] Quota exceeded. Killing network link.");
+      disableNetwork(db).catch(() => {});
+    }
+  }, [quotaExceeded]);
+
+  useEffect(() => {
+    // Immediate network cutoff if we know we're over quota on mount
+    if (quotaExceeded || isQuotaExceeded()) {
+      disableNetwork(db).catch(() => {});
+    }
+
     const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -50,6 +63,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const path = `users/${user.uid}`;
+    
+    // Total silence if quota exceeded
+    if (quotaExceeded || isQuotaExceeded()) {
+      setLoading(false);
+      setRemoteState(null);
+      return;
+    }
+
     let isSubscribed = true;
     
     const unsubscribeDoc = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
@@ -86,14 +107,22 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const path = `users/${user.uid}`;
     try {
+      const { activeFilter, history, ...savableState } = state;
+      const stateString = JSON.stringify(savableState);
+      
+      // Optimization: Only write if state has actually changed from last sync
+      if (lastSyncRef.current === stateString) return;
+
       isWritingRef.current = true;
       const userRef = doc(db, 'users', user.uid);
-      const { activeFilter, history, ...savableState } = state;
       
       await setDoc(userRef, {
         ...savableState,
         updatedAt: serverTimestamp()
       }, { merge: true });
+      
+      lastSyncRef.current = stateString;
+      setLastSyncedAt(new Date());
       
       // Delay resetting the write flag to allow snapshots to propagate
       setTimeout(() => { isWritingRef.current = false; }, 2000);
@@ -129,7 +158,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [user, quotaExceeded, handleQuotaExceeded]);
 
   return (
-    <FirebaseContext.Provider value={{ user, loading, syncState, saveHistoryItem, remoteState, quotaExceeded }}>
+    <FirebaseContext.Provider value={{ user, loading, syncState, saveHistoryItem, remoteState, quotaExceeded, lastSyncedAt }}>
       {children}
     </FirebaseContext.Provider>
   );
