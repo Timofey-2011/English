@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   BookOpen, 
@@ -44,13 +44,13 @@ import {
 import { generateLearningPlan, getExerciseFeedback, getTutorResponse, getTaskAudio, getWordTranslation, generateScenarios, generateReplacementTask } from './lib/gemini';
 import { AppState, UserAssessment, LearningTask, WeeklyPlan, AIChatMessage, ProficiencyLevel, AppMode, CommunicationScenario } from './types';
 import { useFirebase } from './components/FirebaseProvider';
-import { signInWithGoogle, logout } from './lib/firebase';
+import { signInWithGoogle, logout, isQuotaExceeded } from './lib/firebase';
 
 // Browser Speech Recognition
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 export default function App() {
-  const { user, loading: firebaseLoading, syncState, saveHistoryItem, remoteState } = useFirebase();
+  const { user, loading: firebaseLoading, syncState, saveHistoryItem, remoteState, quotaExceeded } = useFirebase();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [state, setState] = useState<AppState>(() => {
@@ -251,25 +251,47 @@ export default function App() {
     }
   }, [user, remoteState?.streak?.lastLoginDate]);
 
+  // Debounced Sync Effect to stay within free tier limits
   useEffect(() => {
     localStorage.setItem('linguist_ai_state', JSON.stringify(state));
-    if (user && state.onboardingComplete) {
-      syncState(state);
+    
+    // Fail fast if quota is exceeded or storage marks it as such
+    if (user && state.onboardingComplete && !quotaExceeded && sessionStorage.getItem('firestore_quota_exceeded') !== 'true') {
+      const handler = setTimeout(() => {
+        // Double check right before calling
+        if (sessionStorage.getItem('firestore_quota_exceeded') !== 'true' && !isQuotaExceeded()) {
+          syncState(state);
+        }
+      }, 60000); 
+
+      return () => clearTimeout(handler);
     }
-  }, [state, user]);
+  }, [state, user, quotaExceeded, syncState]);
+
+  // Quota Exceeded Notification
+  useEffect(() => {
+    if (quotaExceeded) {
+      console.warn("CRITICAL: Firestore Quota Exceeded. Writes are suspended until tomorrow.");
+    }
+  }, [quotaExceeded]);
 
    // Sync from remote when user logs in
   useEffect(() => {
     if (user && remoteState) {
       setState(prev => {
+        // Deep partial comparison to avoid unnecessary state updates that cause sync loops
+        // Only merge if the remote state has something new or different
+        const hasChange = JSON.stringify(remoteState.weeklyPlan?.lastGenerated) !== JSON.stringify(prev.weeklyPlan?.lastGenerated) ||
+                         (remoteState.onboardingComplete !== prev.onboardingComplete);
+        
+        if (!hasChange && prev.onboardingComplete) return prev;
+
         // Prevent sudden resets if already in middle of onboarding or task
         if (prev.activeTaskId && remoteState.activeTaskId === prev.activeTaskId) {
-           return { ...prev, ...remoteState }; // safe to merge
+           return { ...prev, ...remoteState }; 
         }
-        if (prev.activeTaskId) {
-           // We are in a task, don't overwrite the core state until done
-           return prev; 
-        }
+        if (prev.activeTaskId) return prev; 
+        
         return {
           ...prev,
           ...remoteState,
@@ -408,10 +430,6 @@ export default function App() {
         return a;
       });
 
-      if (user) {
-        saveHistoryItem(historyItem);
-      }
-      
       return {
         ...prev,
         history: updatedHistory,
@@ -428,7 +446,19 @@ export default function App() {
       };
     });
 
-    // 2. Continuous Intelligence Protocol: Synchronize a new task to maintain sector density
+    // 2. Trigger persistent storage side-effect outside the state updater
+    if (user && !quotaExceeded) {
+      const type = task.type;
+      saveHistoryItem({ 
+        taskId, 
+        score, 
+        feedback, 
+        date: new Date().toISOString(),
+        taskType: type 
+      });
+    }
+
+    // 3. Continuous Intelligence Protocol: Synchronize a new task to maintain sector density
     if (state.assessment) {
       setTimeout(async () => {
         try {
@@ -474,6 +504,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg-base text-text-main flex flex-col lg:flex-row relative overflow-hidden font-sans">
+      <AnimatePresence>
+        {quotaExceeded && (
+          <motion.div 
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="fixed top-0 inset-x-0 z-[200] bg-orange-500/90 backdrop-blur-md text-white py-3 px-6 text-center text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-2xl"
+          >
+            <Shield className="w-4 h-4" />
+            <span>Neural Link Limited: Daily Synchronization Quota Exceeded. Progress will be saved locally.</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="neural-background" />
 
       {/* Mobile Top Header */}
@@ -593,7 +636,9 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {!state.onboardingComplete ? (
+        {!user ? (
+          <AuthScreen onGoogleSignIn={signInWithGoogle} />
+        ) : !state.onboardingComplete ? (
           <motion.div 
             key="entry" 
             initial={{ opacity: 0 }} 
@@ -3136,6 +3181,97 @@ function TutorPanel({ isOpen, onToggle, messages, setMessages }: {
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+function AuthScreen({ onGoogleSignIn }: { onGoogleSignIn: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSignIn = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await onGoogleSignIn();
+    } catch (err: any) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        setError(err.message || "Failed to establish secure link.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] bg-bg-base flex items-center justify-center p-6"
+    >
+      <div className="neural-background" />
+      
+      <div className="w-full max-w-md relative z-10">
+        <div className="text-center mb-12">
+          <motion.div 
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-20 h-20 bg-accent-blue rounded-[2rem] mx-auto mb-8 flex items-center justify-center text-bg-base shadow-2xl shadow-accent-blue/20"
+          >
+            <Globe className="w-10 h-10" />
+          </motion.div>
+          <h1 className="text-4xl font-black italic tracking-tighter mb-3 text-white uppercase">Cognito <span className="text-accent-blue">AI</span></h1>
+          <p className="text-text-dim font-bold uppercase tracking-[0.4em] text-[10px] bg-white/5 py-2 px-4 rounded-full inline-block">Neural Intelligence Access Layer</p>
+        </div>
+
+        <div className="bg-bg-card/50 backdrop-blur-3xl border border-white/5 rounded-[3rem] p-10 md:p-12 shadow-2xl relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-accent-blue/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-accent-blue/10 transition-colors" />
+          
+          <div className="space-y-8">
+            <div className="text-center">
+              <h2 className="text-xl font-bold text-white mb-2 uppercase tracking-tight">Identity Authentication</h2>
+              <p className="text-sm text-text-dim italic">Access your personalized neural curriculum from any device via Google SSO.</p>
+            </div>
+
+            <button 
+              onClick={handleSignIn}
+              disabled={loading}
+              className="w-full h-16 rounded-[1.5rem] bg-white text-bg-base font-black flex items-center justify-center gap-4 hover:bg-opacity-90 transition-all shadow-xl shadow-white/5 active:scale-95 disabled:opacity-50"
+            >
+              {loading ? (
+                <RefreshCw className="w-6 h-6 animate-spin" />
+              ) : (
+                <>
+                  <div className="w-6 h-6 flex items-center justify-center bg-bg-base text-white rounded-full font-serif font-black text-xs">G</div>
+                  <span className="uppercase tracking-widest text-sm">Sync with Google ID</span>
+                </>
+              )}
+            </button>
+
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-4 text-red-400 text-xs font-bold leading-relaxed"
+              >
+                <Shield className="w-5 h-5 shrink-0" />
+                <span>{error}</span>
+              </motion.div>
+            )}
+
+            <div className="pt-6 border-t border-white/5 text-center">
+              <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.4em] leading-relaxed">
+                By connecting, you authorize secure synchronization of your linguistic progress metadata.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-12 text-center text-[8px] font-black text-white/10 uppercase tracking-[0.5em] leading-relaxed italic">
+          Cognito AI Core • Authentication Module v5.0.0
+        </p>
+      </div>
+    </motion.div>
   );
 }
 

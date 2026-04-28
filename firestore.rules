@@ -24,7 +24,12 @@ service cloud.firestore {
     }
 
     function isEmailVerified() {
-      return request.auth.token.email_verified == true;
+      // Relaxed for internal cognito.internal accounts
+      return request.auth.token.email_verified == true || request.auth.token.email.matches('.*@cognito\\.internal$');
+    }
+
+    function isValidUsernameMapping(data) {
+      return data.keys().hasAll(['uid']) && data.uid == request.auth.uid;
     }
 
     // --- Validation Blueprints ---
@@ -74,6 +79,12 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if false;
       }
+    }
+
+    match /usernames/{username} {
+      allow get: if true; // Publicly readable to check existence during registration
+      allow create: if isSignedIn() && isValidUsernameMapping(incoming());
+      allow delete: if isSignedIn() && existing().uid == request.auth.uid;
     }
   }
 }

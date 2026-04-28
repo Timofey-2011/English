@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { initializeFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, onSnapshot, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, onSnapshot, getDocFromServer, disableNetwork } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -39,9 +39,21 @@ interface FirestoreErrorInfo {
   }
 }
 
+let quotaExceededGlobal = sessionStorage.getItem('firestore_quota_exceeded') === 'true';
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('resource-exhausted') || message.includes('Quota exceeded')) {
+    if (!quotaExceededGlobal) {
+      quotaExceededGlobal = true;
+      sessionStorage.setItem('firestore_quota_exceeded', 'true');
+      console.warn("CRITICAL: Firestore Quota Exceeded. Disconnecting network to prevent retry loops.");
+      disableNetwork(db).catch(e => console.error("Failed to disable network:", e));
+    }
+  }
+  
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: message,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -62,18 +74,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Validation test per instructions
 async function testConnection() {
+  if (quotaExceededGlobal || sessionStorage.getItem('firestore_quota_exceeded') === 'true') {
+    return;
+  }
   try {
     const docRef = doc(db, 'test', 'connection');
     await getDocFromServer(docRef);
-    console.log("Firebase Connection: Active");
   } catch (error: any) {
-    if (error?.code === 'unavailable') {
-      console.warn("Firestore backend is currently unavailable. This might be a temporary network issue.");
-    } else if (error?.message?.includes('the client is offline')) {
-      console.error("Firebase Connection Failed: Client is offline. Please check your config.");
-    } else {
-      console.log("Firebase Connection Test Result:", error?.code || error?.message);
-    }
+    // Ignore early errors to prevent noise if we're hitting quota right away
   }
 }
 testConnection();
@@ -102,3 +110,7 @@ export const signInWithGoogle = async () => {
   }
 };
 export const logout = () => signOut(auth);
+// Logic check: if quota exceeded, we should fail fast to avoid SDK retries
+export const isQuotaExceeded = () => {
+    return quotaExceededGlobal || sessionStorage.getItem('firestore_quota_exceeded') === 'true';
+};

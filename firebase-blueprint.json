@@ -96,6 +96,14 @@
         "taskType": { "type": "string" }
       },
       "required": ["taskId", "score", "feedback", "date", "taskType"]
+    },
+    "UsernameMapping": {
+      "title": "UsernameMapping",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" }
+      },
+      "required": ["uid"]
     }
   },
   "firestore": {
@@ -106,6 +114,10 @@
     "/users/{userId}/history/{historyId}": {
       "schema": "HistoryItem",
       "description": "User exercise history"
+    },
+    "/usernames/{username}": {
+      "schema": "UsernameMapping",
+      "description": "Ensures unique nicknames"
     }
   }
 }
